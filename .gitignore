@@ -51,4 +51,4 @@ npm-debug.log*
 cdk.out
 stack/__pycache__
 **/*.old
-**/*.DS_Store
+**/.DS_Store
