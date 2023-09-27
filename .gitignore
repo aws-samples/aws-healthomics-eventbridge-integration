@@ -1,0 +1,54 @@
+# CDK asset staging directory
+.cdk.staging/
+
+# CDK output directory
+cdk.out/
+
+# Node dependencies
+node_modules/
+ 
+
+# TypeScript compiled code
+*.js
+*.d.ts
+
+# Python Byte-compiled
+*.py[cod]
+
+# AWS SAM
+.sam/
+ 
+# VS Code
+.vscode/
+ 
+ 
+# Directories used by virtualenv
+env/
+venv/
+ENV/
+.venv/
+.venv
+.env
+venv
+__pycache__
+
+# macOS
+.DS_Store
+
+# Logs
+logs
+*.log
+ 
+
+# Build files
+dist/
+build/
+
+# Npm debug logs
+npm-debug.log*
+
+# extras
+cdk.out
+stack/__pycache__
+**/*.old
+**/*.DS_Store
