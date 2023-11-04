@@ -1,0 +1,2 @@
+sample_name,read_group,fastq_1,fastq_2,platform
+NA12878,Sample_U0a,s3://aws-genomics-static-us-west-2/omics-tutorials/data/fastq/NA12878/Sample_U0a/U0a_CGATGT_L001_R1_001.fastq.gz,s3://aws-genomics-static-us-west-2/omics-tutorials/data/fastq/NA12878/Sample_U0a/U0a_CGATGT_L001_R2_001.fastq.gz,illumina
