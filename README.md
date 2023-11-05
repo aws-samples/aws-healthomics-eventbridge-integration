@@ -66,8 +66,10 @@ Create a Cloud9 Instance to run this solution (https://catalog.us-east-1.prod.wo
 
 ### Option 2 : Using your desktop
 
-You can set up the pre-requisites on your local workstation/laptop as well. Look at the requirements.txt file in https://gitlab.aws.dev/omics/omics-event-bridge-int/-/blob/main/requirements.txt
-(will change when uploaded to GitHub)
+You can instead set up the pre-requisites on your local workstation/laptop using [./requirements.txt](./requirements.txt):
+```
+$ pip install -r ./requirements.txt
+```
 
 ## Implementation
 
