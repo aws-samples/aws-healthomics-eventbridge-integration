@@ -6,11 +6,12 @@ import logging
 import uuid
 from collections import defaultdict
 
-OUTPUT_S3_LOCATION = os.environ['OUTPUT_S3_LOCATION']    
-OMICS_ROLE = os.environ['OMICS_ROLE']        
+OUTPUT_S3_LOCATION = os.environ['OUTPUT_S3_LOCATION']
+OMICS_ROLE = os.environ['OMICS_ROLE']
 WORKFLOW_ID = os.environ['WORKFLOW_ID']
 ECR_REGISTRY = os.environ['ECR_REGISTRY']
 LOG_LEVEL = os.environ['LOG_LEVEL']
+AWS_REGION = os.environ.get('AWS_REGION', 'us-east-1')
 
 omics = boto3.client('omics')
 s3 = boto3.client('s3')
@@ -50,9 +51,14 @@ def build_input_payload_for_r2r_gatk_fastq2vcf(sample_manifest_csv):
     SampleX,RG2,s3://path/to/SampleX/RG2/001_R1.fastq.gz,s3://path/to/SampleX/RG2/001_R2.fastq.gz,solid
     SampleX,RG2,s3://path/to/SampleX/RG2/002_R1.fastq.gz,s3://path/to/SampleX/RG2/002_R2.fastq.gz,solid
     """
-    
+
     with open(sample_manifest_csv) as smc:
-        contents = smc.readlines()
+        raw_contents = smc.read()
+
+    # Replace {aws-region} placeholder with actual region
+    raw_contents = raw_contents.replace('{aws-region}', AWS_REGION)
+    logging.info(f"Replaced {{aws-region}} placeholder with: {AWS_REGION}")
+    contents = raw_contents.strip().split('\n')
     
     header = contents[0].strip()
     if header != "sample_name,read_group,fastq_1,fastq_2,platform":

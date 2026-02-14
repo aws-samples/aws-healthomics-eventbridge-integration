@@ -62,7 +62,7 @@ The following prerequisites are needed to deploy and test the solution:
 
 ### Option 1 : Use Cloud9 
 
-Create a Cloud9 Instance to run this solution (https://catalog.us-east-1.prod.workshops.aws/workshops/d93fec4c-fb0f-4813-ac90-758cb5527f2f/en-US/start/cloud9)
+Create a Cloud9 Instance to run this solution (https://catalog.us-east-1.prod.workshops.aws/workshops/d93fec4c-fb0f-4813-ac90-758cb5527f2f/en-US/start/using-own-account/cloud9)
 
 ### Option 2 : Using your desktop
 
@@ -82,7 +82,7 @@ Open Cloud9 environment or local environment and run the commands below to initi
 [IMPORTANT!]
 > **Check for availability of all services such as HealthOmics in the region before you take the steps below. Use the following resource to confirm: https://aws.amazon.com/about-aws/global-infrastructure/regional-product-services/**
 
-    python -m pip install aws-cdk-lib
+    python3 -m pip install aws-cdk-lib
     npm install -g aws-cdk
     npm install -g aws-cdk --force
     cdk bootstrap aws://<ACCOUNTID>/<AWS-REGION>   # do this if your account hasn't been bootstraped
@@ -118,12 +118,73 @@ The deployment creates the following resources:
 [NOTE!]
 You can verify that these resources were created by navigating the AWS console after successful CDK deployment.
 
+## Configuration
+
+### Notification Settings
+
+The solution supports optional email notifications for workflow completions. Configure these settings in `constants.py` before deployment:
+
+```python
+DEV_CONFIG = {
+    # ... other settings ...
+
+    # Notification Settings
+    "SEND_COMPLETION_NOTIFICATION": False,  # Set to True to enable completion emails
+    "SES_SENDER_EMAIL": "",                 # e.g., "sender@example.com"
+    "SES_RECIPIENT_EMAIL": "",              # e.g., "recipient@example.com"
+}
+```
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `SEND_COMPLETION_NOTIFICATION` | Enable/disable email notifications for successful workflow completions | `False` |
+| `SES_SENDER_EMAIL` | Sender email address (must be verified in SES) | `""` (empty) |
+| `SES_RECIPIENT_EMAIL` | Recipient email address (must be verified in SES) | `""` (empty) |
+
+#### Setting Up Completion Notifications
+
+1. **Verify Email Addresses in SES**
+
+   Before enabling completion notifications, verify both sender and recipient email addresses in Amazon SES:
+   ```bash
+   aws ses verify-email-identity --email-address sender@example.com
+   aws ses verify-email-identity --email-address recipient@example.com
+   ```
+   Check your inbox and confirm the verification emails.
+
+2. **Update Configuration**
+
+   Edit `constants.py` to enable notifications:
+   ```python
+   "SEND_COMPLETION_NOTIFICATION": True,
+   "SES_SENDER_EMAIL": "sender@example.com",
+   "SES_RECIPIENT_EMAIL": "recipient@example.com",
+   ```
+
+3. **Deploy the Stack**
+   ```bash
+   cdk deploy --all
+   ```
+
+#### Notification Behavior
+
+| Workflow Status | Notification |
+|-----------------|--------------|
+| `FAILED` | Always sent via SNS topic (subscribe to receive) |
+| `COMPLETED` | Only sent if `SEND_COMPLETION_NOTIFICATION: True` |
+
+When completion notifications are enabled:
+- **VEP workflow**: Sends HTML email with presigned download URLs for result files (valid for 24 hours)
+- **GATK-BP workflow**: Sends notification indicating VEP annotation will start automatically
+
+---
+
 ## Solution Walkthrough & Testing
 
 
 ### Subscribe to workflow failure SNS notification
 
-Before you test the solution, you need to subscribe to the Amazon SNS topic (name should be *_workflow_status_topic) with your email address to receive email notifications in case the HealthOmics workflow runs fail. Follow instructions here on how to subscribe: https://docs.aws.amazon.com/sns/latest/dg/sns-create-subscribe-endpoint-to-topic.html 
+Before you test the solution, you need to subscribe to the Amazon SNS topic (name should be *_workflow_status_topic) with your email address to receive email notifications in case the HealthOmics workflow runs fail. Follow instructions here on how to subscribe: https://docs.aws.amazon.com/sns/latest/dg/sns-create-subscribe-endpoint-to-topic.html
 
 [NOTE!]
 > Confirm your subscription using the email received right after the above step.

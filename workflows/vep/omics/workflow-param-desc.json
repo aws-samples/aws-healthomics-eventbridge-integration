@@ -11,8 +11,8 @@
         "vep_species": {
                 "description": "Species for your data. This can be the latin name e.g. homo_sapiens or any Ensembl alias e.g. mouse"
         },
-        "ecr_registry": {
-                "description": "Amazon ECR registry for container images (e.g. '<account-id>.dkr.ecr.<region>.amazonaws.com')",
+        "vep_container": {
+                "description": "Full ECR container image URI for VEP (automatically provided by CDK deployment)",
                 "optional": false
         },
         "vep_genome": {

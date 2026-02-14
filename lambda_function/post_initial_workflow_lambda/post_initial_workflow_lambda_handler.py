@@ -4,11 +4,11 @@ from botocore.exceptions import ClientError
 import logging
 import uuid
 
-OUTPUT_S3_LOCATION = os.environ['OUTPUT_S3_LOCATION']    
-OMICS_ROLE = os.environ['OMICS_ROLE']        
+OUTPUT_S3_LOCATION = os.environ['OUTPUT_S3_LOCATION']
+OMICS_ROLE = os.environ['OMICS_ROLE']
 WORKFLOW_ID = os.environ['WORKFLOW_ID']
 UPSTREAM_WORKFLOW_ID = os.environ['UPSTREAM_WORKFLOW_ID']
-ECR_REGISTRY = os.environ['ECR_REGISTRY']
+VEP_CONTAINER_IMAGE = os.environ['VEP_CONTAINER_IMAGE']
 VEP_SPECIES = os.environ['SPECIES']
 VEP_DIR_CACHE = os.environ['DIR_CACHE']
 VEP_CACHE_VERSION = os.environ['CACHE_VERSION']
@@ -108,7 +108,7 @@ def handler(event, context, omics_client=omics, s3_client=s3):
         "vcf": vcf_file,
         "vep_species": VEP_SPECIES,
         "vep_genome": VEP_GENOME,
-        "ecr_registry": ECR_REGISTRY,
+        "vep_container": VEP_CONTAINER_IMAGE,
         "vep_cache": VEP_DIR_CACHE,
         "vep_cache_version": VEP_CACHE_VERSION
     }

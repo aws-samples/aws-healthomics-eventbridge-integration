@@ -1,15 +1,20 @@
 from aws_cdk import (
-    Stack,  
-    Duration, 
+    Stack,
+    Duration,
+    RemovalPolicy,
     aws_s3 as s3,
     aws_lambda as lambda_,
     aws_omics as omics,
     aws_lambda_event_sources as lambda_event_sources,
     aws_events as events,
-    aws_events_targets as events_targets,    
+    aws_events_targets as events_targets,
     aws_sns as sns,
     aws_iam as iam,
     aws_s3_assets as s3_assets,
+    aws_ecr as ecr,
+    aws_ecr_assets as ecr_assets,
+    aws_codebuild as codebuild,
+    custom_resources as cr,
     Aspects
 )
 
@@ -172,7 +177,7 @@ class omics_workflow_Stack(Stack):
                 "arn:aws:s3:::giab/*",
                 f"arn:aws:s3:::aws-genomics-static-{aws_region}",
                 f"arn:aws:s3:::aws-genomics-static-{aws_region}/*",
-                f"arn:aws:s3:::omics-{aws_region}"
+                f"arn:aws:s3:::omics-{aws_region}",
                 f"arn:aws:s3:::omics-{aws_region}/*"     
                 ]
             )
@@ -223,6 +228,136 @@ class omics_workflow_Stack(Stack):
         )
         lambda_role.add_to_policy(lambda_omics_policy)
 
+        # KMS permission for SNS topic encryption
+        lambda_kms_policy = iam.PolicyStatement(
+            actions = [
+                'kms:GenerateDataKey',
+                'kms:Decrypt'
+            ],
+            resources = ['*']
+        )
+        lambda_role.add_to_policy(lambda_kms_policy)
+
+        # SES permission for sending HTML emails
+        lambda_ses_policy = iam.PolicyStatement(
+            actions = [
+                'ses:SendEmail',
+                'ses:SendRawEmail'
+            ],
+            resources = ['*']
+        )
+        lambda_role.add_to_policy(lambda_ses_policy)
+
+        ################################################################################################
+        #################################### ECR Docker Image for VEP ##################################
+
+        # Create a dedicated ECR repository for VEP (not using CDK bootstrap repo)
+        # This allows proper resource policy configuration for HealthOmics
+        vep_ecr_repo = ecr.Repository(self, f"{APP_NAME}-vep-repo",
+            repository_name=f"{APP_NAME}-vep",
+            removal_policy=RemovalPolicy.DESTROY,
+            empty_on_delete=True,
+            image_scan_on_push=True
+        )
+
+        # Add resource policy allowing HealthOmics service to pull images
+        # Reference: https://docs.aws.amazon.com/omics/latest/dev/permissions-ecr.html
+        vep_ecr_repo.add_to_resource_policy(
+            iam.PolicyStatement(
+                sid="OmicsWorkflowAccess",
+                effect=iam.Effect.ALLOW,
+                principals=[iam.ServicePrincipal("omics.amazonaws.com")],
+                actions=[
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "ecr:BatchCheckLayerAvailability"
+                ],
+                conditions={
+                    "StringEquals": {
+                        "aws:SourceAccount": aws_account
+                    }
+                }
+            )
+        )
+
+        # CodeBuild project to build and push VEP Docker image to dedicated ECR repo
+        vep_build_project = codebuild.Project(self, f"{APP_NAME}-vep-build",
+            project_name=f"{APP_NAME}-vep-image-build",
+            environment=codebuild.BuildEnvironment(
+                build_image=codebuild.LinuxBuildImage.STANDARD_7_0,
+                privileged=True  # Required for Docker builds
+            ),
+            environment_variables={
+                "ECR_REPO_URI": codebuild.BuildEnvironmentVariable(value=vep_ecr_repo.repository_uri),
+                "AWS_ACCOUNT_ID": codebuild.BuildEnvironmentVariable(value=aws_account),
+                "AWS_REGION": codebuild.BuildEnvironmentVariable(value=aws_region)
+            },
+            build_spec=codebuild.BuildSpec.from_object({
+                "version": "0.2",
+                "phases": {
+                    "pre_build": {
+                        "commands": [
+                            "echo Logging in to Amazon ECR...",
+                            "aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+                        ]
+                    },
+                    "build": {
+                        "commands": [
+                            "echo Building VEP Docker image...",
+                            "docker pull quay.io/biocontainers/ensembl-vep:106.1--pl5321h4a94de4_0",
+                            "docker tag quay.io/biocontainers/ensembl-vep:106.1--pl5321h4a94de4_0 $ECR_REPO_URI:latest",
+                            "docker tag quay.io/biocontainers/ensembl-vep:106.1--pl5321h4a94de4_0 $ECR_REPO_URI:106.1"
+                        ]
+                    },
+                    "post_build": {
+                        "commands": [
+                            "echo Pushing VEP image to ECR...",
+                            "docker push $ECR_REPO_URI:latest",
+                            "docker push $ECR_REPO_URI:106.1",
+                            "echo Build completed successfully"
+                        ]
+                    }
+                }
+            }),
+            timeout=Duration.minutes(30)
+        )
+
+        # Grant CodeBuild permission to push to ECR
+        vep_ecr_repo.grant_pull_push(vep_build_project)
+
+        # Custom Resource to trigger CodeBuild during deployment
+        trigger_build = cr.AwsCustomResource(self, f"{APP_NAME}-trigger-vep-build",
+            on_create=cr.AwsSdkCall(
+                service="CodeBuild",
+                action="startBuild",
+                parameters={
+                    "projectName": vep_build_project.project_name
+                },
+                physical_resource_id=cr.PhysicalResourceId.of(f"{APP_NAME}-vep-build-trigger")
+            ),
+            on_update=cr.AwsSdkCall(
+                service="CodeBuild",
+                action="startBuild",
+                parameters={
+                    "projectName": vep_build_project.project_name
+                },
+                physical_resource_id=cr.PhysicalResourceId.of(f"{APP_NAME}-vep-build-trigger")
+            ),
+            policy=cr.AwsCustomResourcePolicy.from_statements([
+                iam.PolicyStatement(
+                    actions=["codebuild:StartBuild"],
+                    resources=[vep_build_project.project_arn]
+                )
+            ])
+        )
+
+        # Ensure build is triggered after ECR repo is created
+        trigger_build.node.add_dependency(vep_ecr_repo)
+        trigger_build.node.add_dependency(vep_build_project)
+
+        # Store the full image URI for use in Lambda environment variables
+        vep_container_image_uri = f"{vep_ecr_repo.repository_uri}:latest"
+
         ################################################################################################
         #################################### Create HealthOmics Workflow ###############################
 
@@ -260,7 +395,7 @@ class omics_workflow_Stack(Stack):
         # initial HealthOmics workflow
         initial_workflow_lambda = lambda_.Function(
             self, f"{APP_NAME}_initial_workflow_lambda",
-            runtime=lambda_.Runtime.PYTHON_3_8,
+            runtime=lambda_.Runtime.PYTHON_3_12,
             handler="initial_workflow_lambda_handler.handler",
             code=lambda_.Code.from_asset("lambda_function/initial_workflow_lambda"),
             role=lambda_role,
@@ -292,7 +427,7 @@ class omics_workflow_Stack(Stack):
         # Create Lambda function to submit second Omics pipeline
         second_workflow_lambda = lambda_.Function(
             self, f"{APP_NAME}_post_initial_workflow_lambda",
-            runtime=lambda_.Runtime.PYTHON_3_8,
+            runtime=lambda_.Runtime.PYTHON_3_12,
             handler="post_initial_workflow_lambda_handler.handler",
             code=lambda_.Code.from_asset("lambda_function/post_initial_workflow_lambda"),
             role=lambda_role,
@@ -303,7 +438,7 @@ class omics_workflow_Stack(Stack):
                 "OUTPUT_S3_LOCATION": "s3://" + bucket_output.bucket_name + "/outputs",
                 "WORKFLOW_ID": private_workflow_cfn.attr_id,
                 "UPSTREAM_WORKFLOW_ID": READY2RUN_WORKFLOW_ID,
-                "ECR_REGISTRY": aws_account + ".dkr.ecr." + aws_region + ".amazonaws.com",
+                "VEP_CONTAINER_IMAGE": vep_container_image_uri,
                 "SPECIES": "homo_sapiens",
                 "DIR_CACHE": f"s3://aws-genomics-static-{aws_region}/omics-tutorials/data/databases/vep/",
                 "CACHE_VERSION": "110",
@@ -331,6 +466,42 @@ class omics_workflow_Stack(Stack):
             )
         )
         rule_second_workflow_lambda.add_target(events_targets.LambdaFunction(second_workflow_lambda))
+
+        ################################################################################################
+        #################################### Notification Lambda for Completion ########################
+
+        # Get notification settings from config
+        send_completion_notification = config.get("SEND_COMPLETION_NOTIFICATION", False)
+        ses_sender_email = config.get("SES_SENDER_EMAIL", "")
+        ses_recipient_email = config.get("SES_RECIPIENT_EMAIL", "")
+
+        # Create Lambda function for workflow completion notifications
+        # Sends HTML emails via SES with clickable presigned URLs
+        notification_lambda = lambda_.Function(
+            self, f"{APP_NAME}_notification_lambda",
+            runtime=lambda_.Runtime.PYTHON_3_12,
+            handler="notification_lambda_handler.handler",
+            code=lambda_.Code.from_asset("lambda_function/notification_lambda"),
+            role=lambda_role,
+            timeout=Duration.seconds(60),
+            retry_attempts=1,
+            environment={
+                "SNS_TOPIC_ARN": sns_topic.topic_arn,
+                "VEP_WORKFLOW_ID": private_workflow_cfn.attr_id,
+                "GATK_WORKFLOW_ID": READY2RUN_WORKFLOW_ID,
+                "SES_SENDER_EMAIL": ses_sender_email,
+                "SES_RECIPIENT_EMAIL": ses_recipient_email,
+                "SEND_COMPLETION_NOTIFICATION": str(send_completion_notification),
+                "LOG_LEVEL": "INFO"
+            }
+        )
+
+        # Grant notification lambda permission to publish to SNS
+        sns_topic.grant_publish(notification_lambda)
+
+        # The notification lambda uses the same EventBridge rule as second_workflow_lambda
+        # since both need to respond to COMPLETED events
+        rule_second_workflow_lambda.add_target(events_targets.LambdaFunction(notification_lambda))
 
         #Aspects.of(self).add(cdk_nag.AwsSolutionsChecks())
  
